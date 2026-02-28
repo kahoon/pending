@@ -2,6 +2,9 @@ package pending
 
 import "time"
 
+// TelemetryHandler receives lifecycle events for scheduled tasks.
+//
+// Implementations can be used to emit logs, metrics, or traces.
 type TelemetryHandler interface {
 	OnScheduled(id string, d time.Duration)
 	OnRescheduled(id string)

@@ -81,6 +81,9 @@ for i := 0; i < 100; i++ {
 }
 ```
 
+When a task is dropped under `StrategyDrop`, your telemetry handler receives
+`pending.ErrTaskDropped` via `OnFailed`, so you can match it with `errors.Is`.
+
 ### Graceful Shutdown
 
 ```go

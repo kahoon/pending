@@ -2,10 +2,14 @@ package pending
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"sync"
 	"time"
 )
+
+// ErrTaskDropped is reported to TelemetryHandler.OnFailed when StrategyDrop
+// rejects a task because no concurrency slot is available.
+var ErrTaskDropped = errors.New("pending: task dropped due to concurrency limit")
 
 // Task defines the function signature for a scheduled action.
 // The provided context is cancelled if the manager shuts down or the task is replaced.
@@ -108,7 +112,7 @@ func (m *Manager) acquireSlot(ctx context.Context, id string, e *entry) bool {
 		case m.semaphore <- struct{}{}:
 			return true
 		default:
-			m.logger.OnFailed(id, fmt.Errorf("limit reached: dropped"))
+			m.logger.OnFailed(id, ErrTaskDropped)
 			m.deleteIfCurrent(id, e)
 			return false
 		}
@@ -144,6 +148,15 @@ func (m *Manager) Cancel(id string) {
 	}
 }
 
+func (m *Manager) deleteIfCurrent(id string, target *entry) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if current, ok := m.pending[id]; ok && current == target {
+		delete(m.pending, id)
+	}
+}
+
 // Shutdown stops the manager, cancels all pending timers, and waits for
 // currently executing tasks to complete or for the context to time out.
 func (m *Manager) Shutdown(ctx context.Context) error {
@@ -170,14 +183,5 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
-	}
-}
-
-func (m *Manager) deleteIfCurrent(id string, target *entry) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if current, ok := m.pending[id]; ok && current == target {
-		delete(m.pending, id)
 	}
 }
