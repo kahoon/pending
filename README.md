@@ -97,6 +97,26 @@ if err := mgr.Shutdown(ctx); err != nil {
 }
 ```
 
+## Benchmarks
+
+Run benchmarks:
+
+```bash
+go test -run ^$ -bench BenchmarkManager_ -benchmem ./...
+```
+
+Sample output (darwin/arm64, Apple M4):
+
+```text
+BenchmarkManager_Schedule-10                     	  969188	       293.8 ns/op	     473 B/op	       6 allocs/op
+BenchmarkManager_RescheduleSameID-10             	 1502884	       158.6 ns/op	     304 B/op	       5 allocs/op
+BenchmarkManager_Cancel-10                       	 1280494	       188.9 ns/op	     311 B/op	       5 allocs/op
+BenchmarkManager_Shutdown_NoRunningTasks-10      	   75316	      3226 ns/op	      16 B/op	       1 allocs/op
+BenchmarkManager_Shutdown_WithRunningTasks-10    	   44101	      5451 ns/op	      16 B/op	       1 allocs/op
+```
+
+Results will vary by hardware, OS, and Go version.
+
 ## Scope
 
 `pending` is not a cron replacement. It is intentionally focused on in-process deferred work with ID-based replacement and cancellation.
