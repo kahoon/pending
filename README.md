@@ -101,6 +101,13 @@ if err := mgr.Shutdown(ctx); err != nil {
 
 `pending` is not a cron replacement. It is intentionally focused on in-process deferred work with ID-based replacement and cancellation.
 
+## Community
+
+- Contributing guide: CONTRIBUTING.md
+- Security policy: SECURITY.md
+- Code of Conduct: CODE_OF_CONDUCT.md
+- Changelog: CHANGELOG.md
+
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See LICENSE.
