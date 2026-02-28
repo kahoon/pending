@@ -10,6 +10,7 @@ const (
 	StrategyDrop
 )
 
+// Option configures a Manager.
 type Option func(*Manager)
 
 // WithLimit sets the maximum number of concurrent tasks.
