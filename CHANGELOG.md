@@ -9,6 +9,8 @@ The format is based on https://keepachangelog.com/en/1.1.0/, and this project fo
 ### Added
 - Public sentinel error `ErrTaskDropped` for telemetry classification.
 - Package-level docs and example for `pkg.go.dev`.
+- Baseline benchmark suite for schedule, reschedule, cancel, and shutdown paths.
+- README benchmark section with run command and sample output.
 
 ### Changed
 - Safer cleanup semantics for rescheduled tasks (`deleteIfCurrent`).
@@ -27,4 +29,3 @@ The format is based on https://keepachangelog.com/en/1.1.0/, and this project fo
 - Cancellation and graceful shutdown APIs.
 - Concurrency limiting with `StrategyBlock` and `StrategyDrop`.
 - Telemetry hooks for scheduling lifecycle events.
-
