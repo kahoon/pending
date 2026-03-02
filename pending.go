@@ -134,6 +134,15 @@ func (m *Manager) releaseSlot() {
 	}
 }
 
+func (m *Manager) deleteIfCurrent(id string, target *entry) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if current, ok := m.pending[id]; ok && current == target {
+		delete(m.pending, id)
+	}
+}
+
 // Cancel immediately stops a pending task by its ID and prevents it from running.
 // If the task is already running, its context is cancelled.
 func (m *Manager) Cancel(id string) {
@@ -145,15 +154,6 @@ func (m *Manager) Cancel(id string) {
 		e.cancel()
 		delete(m.pending, id)
 		m.logger.OnCancelled(id)
-	}
-}
-
-func (m *Manager) deleteIfCurrent(id string, target *entry) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if current, ok := m.pending[id]; ok && current == target {
-		delete(m.pending, id)
 	}
 }
 

@@ -123,11 +123,11 @@ Results will vary by hardware, OS, and Go version.
 
 ## Community
 
-- Contributing guide: CONTRIBUTING.md
-- Security policy: SECURITY.md
-- Code of Conduct: CODE_OF_CONDUCT.md
-- Changelog: CHANGELOG.md
+- Contributing guide: [CONTRIBUTING](CONTRIBUTING.md)
+- Security policy: [SECURITY](SECURITY.md)
+- Code of Conduct: [CODE_OF_CONDUCT](CODE_OF_CONDUCT.md)
+- Changelog: [CHANGELOG](CHANGELOG.md)
 
 ## License
 
-MIT. See LICENSE.
+MIT. See [LICENSE](LICENSE).
