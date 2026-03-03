@@ -6,6 +6,8 @@ The format is based on https://keepachangelog.com/en/1.1.0/, and this project fo
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-03-03
+
 ### Added
 - Public sentinel error `ErrTaskDropped` for telemetry classification.
 - Package-level docs and example for `pkg.go.dev`.
