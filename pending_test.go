@@ -10,18 +10,25 @@ import (
 
 type spyLogger struct {
 	nopLogger
-	mu      sync.Mutex
-	dropped bool
+	mu        sync.Mutex
+	dropped   bool
+	failedSig chan struct{}
 }
 
 func (s *spyLogger) OnFailed(id string, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.dropped = true
+	if s.failedSig != nil {
+		select {
+		case s.failedSig <- struct{}{}:
+		default:
+		}
+	}
 }
 
 func TestManager_StrategyDrop(t *testing.T) {
-	spy := &spyLogger{}
+	spy := &spyLogger{failedSig: make(chan struct{}, 1)}
 	mgr := NewManager(WithLimit(1, StrategyDrop), WithLogger(spy))
 
 	running := make(chan struct{})
@@ -36,21 +43,10 @@ func TestManager_StrategyDrop(t *testing.T) {
 
 	mgr.Schedule("t2", 1*time.Millisecond, func(ctx context.Context) {})
 
-	deadline := time.After(200 * time.Millisecond)
-	for {
-		spy.mu.Lock()
-		dropped := spy.dropped
-		spy.mu.Unlock()
-		if dropped {
-			break
-		}
-
-		select {
-		case <-deadline:
-			t.Fatal("expected task 2 to be dropped")
-		default:
-			time.Sleep(1 * time.Millisecond)
-		}
+	select {
+	case <-spy.failedSig:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("expected task 2 to be dropped")
 	}
 
 	close(release)
@@ -71,22 +67,31 @@ func TestManager_Shutdown(t *testing.T) {
 func TestManager_StrategyBlock(t *testing.T) {
 	mgr := NewManager(WithLimit(1, StrategyBlock))
 
-	start := make(chan struct{})
-	done := make(chan struct{})
+	firstRunning := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	secondRan := make(chan struct{})
 
 	mgr.Schedule("t1", 1*time.Millisecond, func(ctx context.Context) {
-		close(start)
-		time.Sleep(50 * time.Millisecond)
+		close(firstRunning)
+		<-releaseFirst
 	})
 
-	<-start
+	<-firstRunning
 
 	mgr.Schedule("t2", 1*time.Millisecond, func(ctx context.Context) {
-		close(done)
+		close(secondRan)
 	})
 
 	select {
-	case <-done:
+	case <-secondRan:
+		t.Fatal("task 2 should not run before first task releases slot")
+	case <-time.After(30 * time.Millisecond):
+	}
+
+	close(releaseFirst)
+
+	select {
+	case <-secondRan:
 	case <-time.After(200 * time.Millisecond):
 		t.Error("task 2 blocked for too long or deadlocked")
 	}
@@ -110,8 +115,13 @@ func TestManager_StrategyBlockCancelWhileWaiting(t *testing.T) {
 		close(secondRan)
 	})
 
-	// Give t2 time to reach the blocking acquire path.
-	time.Sleep(20 * time.Millisecond)
+	// Keep t1 holding the slot long enough to ensure t2 attempts to wait for it.
+	select {
+	case <-secondRan:
+		t.Fatal("task 2 should not run while first task holds the slot")
+	case <-time.After(20 * time.Millisecond):
+	}
+
 	mgr.Cancel("t2")
 	close(releaseFirst)
 
@@ -125,10 +135,11 @@ func TestManager_StrategyBlockCancelWhileWaiting(t *testing.T) {
 func TestManager_ShutdownTimeout(t *testing.T) {
 	mgr := NewManager()
 	start := make(chan struct{})
+	release := make(chan struct{})
 
 	mgr.Schedule("stubborn-task", 1*time.Millisecond, func(ctx context.Context) {
 		close(start)
-		time.Sleep(100 * time.Millisecond)
+		<-release
 	})
 
 	<-start
@@ -139,6 +150,13 @@ func TestManager_ShutdownTimeout(t *testing.T) {
 	err := mgr.Shutdown(ctx)
 	if err == nil {
 		t.Error("expected timeout error from shutdown, got nil")
+	}
+
+	close(release)
+	longCtx, longCancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer longCancel()
+	if err := mgr.Shutdown(longCtx); err != nil {
+		t.Fatalf("expected shutdown to eventually complete after release: %v", err)
 	}
 }
 
@@ -181,10 +199,13 @@ func TestManager_RescheduleKeepsNewestEntry(t *testing.T) {
 func TestManager_ShutdownCanRetryAfterTimeout(t *testing.T) {
 	mgr := NewManager()
 	started := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan struct{})
 
 	mgr.Schedule("retry", 1*time.Millisecond, func(ctx context.Context) {
 		close(started)
-		time.Sleep(60 * time.Millisecond)
+		<-release
+		close(done)
 	})
 
 	<-started
@@ -193,6 +214,13 @@ func TestManager_ShutdownCanRetryAfterTimeout(t *testing.T) {
 	defer shortCancel()
 	if err := mgr.Shutdown(shortCtx); err == nil {
 		t.Fatal("expected first shutdown call to time out")
+	}
+
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timed out waiting for retry task to finish")
 	}
 
 	longCtx, longCancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
@@ -238,13 +266,19 @@ func TestCoverageBooster(t *testing.T) {
 func TestCoverage_TimerRaceGuard(t *testing.T) {
 	mgr := NewManager()
 
-	mgr.Schedule("race-trigger", 0, func(ctx context.Context) {})
+	ran := make(chan struct{}, 1)
+	mgr.Schedule("race-trigger", 0, func(ctx context.Context) {
+		ran <- struct{}{}
+	})
 
 	mgr.mu.Lock()
 	mgr.isClosed = true
 	mgr.mu.Unlock()
 
-	time.Sleep(10 * time.Millisecond)
+	select {
+	case <-ran:
+	case <-time.After(100 * time.Millisecond):
+	}
 }
 
 func TestManager_ManualCancel(t *testing.T) {
@@ -255,6 +289,4 @@ func TestManager_ManualCancel(t *testing.T) {
 	})
 
 	mgr.Cancel("cancel-me")
-
-	time.Sleep(10 * time.Millisecond)
 }
