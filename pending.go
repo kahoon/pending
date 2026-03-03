@@ -15,11 +15,22 @@ var ErrTaskDropped = errors.New("pending: task dropped due to concurrency limit"
 // The provided context is cancelled if the manager shuts down or the task is replaced.
 type Task func(ctx context.Context)
 
+// Stats is a point-in-time snapshot of manager state.
+type Stats struct {
+	// Pending is the number of scheduled tasks that are not currently executing.
+	Pending int
+	// Running is the number of tasks currently executing.
+	Running int
+	// Closed reports whether the manager has been shut down.
+	Closed bool
+}
+
 // Manager coordinates the lifecycle of delayed tasks, ensuring thread-safety
 // and providing concurrency control via semaphores.
 type Manager struct {
 	mu      sync.RWMutex
 	pending map[string]*entry
+	running int
 
 	semaphore chan struct{}
 	strategy  Strategy
@@ -90,16 +101,36 @@ func (m *Manager) Schedule(id string, d time.Duration, task Task) {
 				return
 			}
 			defer m.releaseSlot()
+			m.updateRunning(1)
+			defer m.updateRunning(-1)
 
 			start := time.Now()
 			task(ctx)
+			duration := time.Since(start)
 
 			m.deleteIfCurrent(id, e)
-			m.logger.OnExecuted(id, time.Since(start))
+			m.logger.OnExecuted(id, duration)
 		})
 	})
 
 	m.pending[id] = e
+}
+
+// Stats returns a lock-safe snapshot of manager state.
+func (m *Manager) Stats() Stats {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	pending := len(m.pending) - m.running
+	if pending < 0 {
+		pending = 0
+	}
+
+	return Stats{
+		Pending: pending,
+		Running: m.running,
+		Closed:  m.isClosed,
+	}
 }
 
 func (m *Manager) acquireSlot(ctx context.Context, id string, e *entry) bool {
@@ -132,6 +163,12 @@ func (m *Manager) releaseSlot() {
 	if m.semaphore != nil {
 		<-m.semaphore
 	}
+}
+
+func (m *Manager) updateRunning(delta int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.running += delta
 }
 
 func (m *Manager) deleteIfCurrent(id string, target *entry) {

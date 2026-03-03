@@ -249,6 +249,146 @@ func TestManager_ScheduleAfterShutdownIsNoOp(t *testing.T) {
 	}
 }
 
+func TestManager_StatsSnapshotLifecycle(t *testing.T) {
+	mgr := NewManager()
+
+	s := mgr.Stats()
+	if s.Pending != 0 || s.Running != 0 || s.Closed {
+		t.Fatalf("unexpected initial stats: %+v", s)
+	}
+
+	mgr.Schedule("stats-pending", time.Hour, func(ctx context.Context) {})
+	s = mgr.Stats()
+	if s.Pending != 1 || s.Running != 0 || s.Closed {
+		t.Fatalf("unexpected stats after schedule: %+v", s)
+	}
+
+	mgr.Cancel("stats-pending")
+	s = mgr.Stats()
+	if s.Pending != 0 || s.Running != 0 || s.Closed {
+		t.Fatalf("unexpected stats after cancel: %+v", s)
+	}
+
+	if err := mgr.Shutdown(context.Background()); err != nil {
+		t.Fatalf("shutdown failed: %v", err)
+	}
+
+	s = mgr.Stats()
+	if s.Pending != 0 || s.Running != 0 || !s.Closed {
+		t.Fatalf("unexpected stats after shutdown: %+v", s)
+	}
+}
+
+func TestManager_StatsPendingAndRunning(t *testing.T) {
+	mgr := NewManager(WithLimit(1, StrategyBlock))
+
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	secondStarted := make(chan struct{})
+	secondDone := make(chan struct{})
+
+	mgr.Schedule("stats-running", 0, func(ctx context.Context) {
+		close(firstStarted)
+		<-releaseFirst
+	})
+	<-firstStarted
+
+	mgr.Schedule("stats-waiting", 0, func(ctx context.Context) {
+		close(secondStarted)
+		close(secondDone)
+	})
+
+	waitFor(t, 200*time.Millisecond, func() bool {
+		s := mgr.Stats()
+		return s.Running == 1 && s.Pending == 1 && !s.Closed
+	}, "expected one running and one pending task")
+
+	select {
+	case <-secondStarted:
+		t.Fatal("waiting task should not start while first task holds the slot")
+	default:
+	}
+
+	close(releaseFirst)
+
+	select {
+	case <-secondDone:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timed out waiting for second task to complete")
+	}
+
+	waitFor(t, 200*time.Millisecond, func() bool {
+		s := mgr.Stats()
+		return s.Running == 0 && s.Pending == 0
+	}, "expected no running or pending tasks")
+}
+
+func TestManager_StatsConcurrentAccess(t *testing.T) {
+	mgr := NewManager()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var readers sync.WaitGroup
+	errs := make(chan error, 1)
+	for i := 0; i < 4; i++ {
+		readers.Add(1)
+		go func() {
+			defer readers.Done()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+
+				s := mgr.Stats()
+				if s.Pending < 0 || s.Running < 0 {
+					select {
+					case errs <- fmt.Errorf("invalid stats: %+v", s):
+					default:
+					}
+					return
+				}
+			}
+		}()
+	}
+
+	for i := 0; i < 200; i++ {
+		id := fmt.Sprintf("stats-concurrent-%d", i)
+		mgr.Schedule(id, time.Hour, func(ctx context.Context) {})
+		mgr.Cancel(id)
+	}
+
+	cancel()
+	readers.Wait()
+
+	select {
+	case err := <-errs:
+		t.Fatal(err)
+	default:
+	}
+}
+
+func waitFor(t *testing.T, timeout time.Duration, cond func() bool, msg string) {
+	t.Helper()
+
+	deadline := time.After(timeout)
+	ticker := time.NewTicker(1 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		if cond() {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal(msg)
+		case <-ticker.C:
+		}
+	}
+}
+
 func TestCoverageBooster(t *testing.T) {
 	_ = NewManager(
 		WithLimit(1, StrategyBlock),

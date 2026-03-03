@@ -11,10 +11,12 @@ The format is based on https://keepachangelog.com/en/1.1.0/, and this project fo
 - Package-level docs and example for `pkg.go.dev`.
 - Baseline benchmark suite for schedule, reschedule, cancel, and shutdown paths.
 - README benchmark section with run command and sample output.
+- `Stats()` snapshot API with pending/running/closed state.
 
 ### Changed
 - Safer cleanup semantics for rescheduled tasks (`deleteIfCurrent`).
 - Cancellation-aware `StrategyBlock` acquire path.
+- Improved `OnExecuted` timing accuracy by measuring task duration before internal cleanup.
 - README clarity and structure improvements.
 
 ### Fixed
