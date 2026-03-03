@@ -323,6 +323,42 @@ func TestManager_StatsPendingAndRunning(t *testing.T) {
 	}, "expected no running or pending tasks")
 }
 
+func TestManager_StatsPendingClampWhenCanceledWhileRunning(t *testing.T) {
+	mgr := NewManager()
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan struct{})
+
+	mgr.Schedule("stats-clamp", 0, func(ctx context.Context) {
+		close(started)
+		<-release
+		close(done)
+	})
+
+	<-started
+	mgr.Cancel("stats-clamp")
+
+	s := mgr.Stats()
+	if s.Running != 1 {
+		t.Fatalf("expected one running task after cancel, got %+v", s)
+	}
+	if s.Pending != 0 {
+		t.Fatalf("expected pending to clamp to zero, got %+v", s)
+	}
+
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timed out waiting for running task to finish")
+	}
+
+	if err := mgr.Shutdown(context.Background()); err != nil {
+		t.Fatalf("shutdown failed: %v", err)
+	}
+}
+
 func TestManager_StatsConcurrentAccess(t *testing.T) {
 	mgr := NewManager()
 
