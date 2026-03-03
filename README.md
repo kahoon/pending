@@ -16,6 +16,7 @@
 - **Debouncing by ID**: Scheduling the same ID replaces the previous task.
 - **Concurrency Limits**: Choose blocking or dropping behavior when at capacity.
 - **Graceful Shutdown**: Cancel timers and wait for active tasks to finish.
+- **Runtime Stats**: Read pending/running/closed state via `Stats()`.
 - **Pluggable Telemetry**: Attach your own metrics/logging hooks.
 
 ## Installation
@@ -95,6 +96,13 @@ defer cancel()
 if err := mgr.Shutdown(ctx); err != nil {
     log.Printf("shutdown timed out: %v", err)
 }
+```
+
+### Runtime Stats
+
+```go
+s := mgr.Stats()
+log.Printf("pending=%d running=%d closed=%t", s.Pending, s.Running, s.Closed)
 ```
 
 ## Benchmarks
