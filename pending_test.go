@@ -151,12 +151,18 @@ func TestManager_ShutdownTimeout(t *testing.T) {
 	if err == nil {
 		t.Error("expected timeout error from shutdown, got nil")
 	}
+	if s := mgr.Stats(); s.Status != StatusDraining {
+		t.Fatalf("expected status to be draining after shutdown timeout: %+v", s)
+	}
 
 	close(release)
 	longCtx, longCancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer longCancel()
 	if err := mgr.Shutdown(longCtx); err != nil {
 		t.Fatalf("expected shutdown to eventually complete after release: %v", err)
+	}
+	if s := mgr.Stats(); s.Status != StatusClosed {
+		t.Fatalf("expected status to be closed after shutdown completion: %+v", s)
 	}
 }
 
@@ -253,19 +259,19 @@ func TestManager_StatsSnapshotLifecycle(t *testing.T) {
 	mgr := NewManager()
 
 	s := mgr.Stats()
-	if s.Pending != 0 || s.Running != 0 || s.Closed {
+	if s.Pending != 0 || s.Running != 0 || s.Status != StatusAccepting {
 		t.Fatalf("unexpected initial stats: %+v", s)
 	}
 
 	mgr.Schedule("stats-pending", time.Hour, func(ctx context.Context) {})
 	s = mgr.Stats()
-	if s.Pending != 1 || s.Running != 0 || s.Closed {
+	if s.Pending != 1 || s.Running != 0 || s.Status != StatusAccepting {
 		t.Fatalf("unexpected stats after schedule: %+v", s)
 	}
 
 	mgr.Cancel("stats-pending")
 	s = mgr.Stats()
-	if s.Pending != 0 || s.Running != 0 || s.Closed {
+	if s.Pending != 0 || s.Running != 0 || s.Status != StatusAccepting {
 		t.Fatalf("unexpected stats after cancel: %+v", s)
 	}
 
@@ -274,7 +280,7 @@ func TestManager_StatsSnapshotLifecycle(t *testing.T) {
 	}
 
 	s = mgr.Stats()
-	if s.Pending != 0 || s.Running != 0 || !s.Closed {
+	if s.Pending != 0 || s.Running != 0 || s.Status != StatusClosed {
 		t.Fatalf("unexpected stats after shutdown: %+v", s)
 	}
 }
@@ -300,7 +306,7 @@ func TestManager_StatsPendingAndRunning(t *testing.T) {
 
 	waitFor(t, 200*time.Millisecond, func() bool {
 		s := mgr.Stats()
-		return s.Running == 1 && s.Pending == 1 && !s.Closed
+		return s.Running == 1 && s.Pending == 1 && s.Status == StatusAccepting
 	}, "expected one running and one pending task")
 
 	select {
@@ -345,6 +351,9 @@ func TestManager_StatsPendingClampWhenCanceledWhileRunning(t *testing.T) {
 	}
 	if s.Pending != 0 {
 		t.Fatalf("expected pending to clamp to zero, got %+v", s)
+	}
+	if s.Status != StatusAccepting {
+		t.Fatalf("expected status to remain accepting while task runs: %+v", s)
 	}
 
 	close(release)
@@ -406,6 +415,27 @@ func TestManager_StatsConcurrentAccess(t *testing.T) {
 	}
 }
 
+func TestStatus_String(t *testing.T) {
+	tests := []struct {
+		name   string
+		status Status
+		want   string
+	}{
+		{name: "accepting", status: StatusAccepting, want: "accepting"},
+		{name: "draining", status: StatusDraining, want: "draining"},
+		{name: "closed", status: StatusClosed, want: "closed"},
+		{name: "unknown", status: Status(99), want: "unknown"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.status.String(); got != tt.want {
+				t.Fatalf("unexpected status string for %v: got %q, want %q", tt.status, got, tt.want)
+			}
+		})
+	}
+}
+
 func waitFor(t *testing.T, timeout time.Duration, cond func() bool, msg string) {
 	t.Helper()
 
@@ -448,7 +478,7 @@ func TestCoverage_TimerRaceGuard(t *testing.T) {
 	})
 
 	mgr.mu.Lock()
-	mgr.isClosed = true
+	mgr.status = StatusDraining
 	mgr.mu.Unlock()
 
 	select {
