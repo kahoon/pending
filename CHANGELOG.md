@@ -6,6 +6,8 @@ The format is based on https://keepachangelog.com/en/1.1.0/, and this project fo
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-03-04
+
 ### Added
 - Manager lifecycle `Status` model with `StatusAccepting`, `StatusDraining`, and `StatusClosed`.
 
