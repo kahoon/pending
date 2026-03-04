@@ -11,9 +11,30 @@ import (
 // rejects a task because no concurrency slot is available.
 var ErrTaskDropped = errors.New("pending: task dropped due to concurrency limit")
 
-// Task defines the function signature for a scheduled action.
-// The provided context is cancelled if the manager shuts down or the task is replaced.
-type Task func(ctx context.Context)
+// Status represents the current lifecycle state of a Manager.
+type Status int
+
+const (
+	// StatusAccepting means the manager accepts new schedules.
+	StatusAccepting Status = iota
+	// StatusDraining means shutdown has started and running tasks are draining.
+	StatusDraining
+	// StatusClosed means shutdown has completed.
+	StatusClosed
+)
+
+func (s Status) String() string {
+	switch s {
+	case StatusAccepting:
+		return "accepting"
+	case StatusDraining:
+		return "draining"
+	case StatusClosed:
+		return "closed"
+	default:
+		return "unknown"
+	}
+}
 
 // Stats is a point-in-time snapshot of manager state.
 type Stats struct {
@@ -21,9 +42,13 @@ type Stats struct {
 	Pending int
 	// Running is the number of tasks currently executing.
 	Running int
-	// Closed reports whether the manager has been shut down.
-	Closed bool
+	// Status indicates whether the manager is accepting new tasks, draining existing ones, or fully closed.
+	Status Status
 }
+
+// Task defines the function signature for a scheduled action.
+// The provided context is cancelled if the manager shuts down or the task is replaced.
+type Task func(ctx context.Context)
 
 // Manager coordinates the lifecycle of delayed tasks, ensuring thread-safety
 // and providing concurrency control via semaphores.
@@ -31,13 +56,13 @@ type Manager struct {
 	mu      sync.RWMutex
 	pending map[string]*entry
 	running int
+	status  Status
 
 	semaphore chan struct{}
 	strategy  Strategy
 	logger    TelemetryHandler
 
 	wg           sync.WaitGroup
-	isClosed     bool
 	shutdownOnce sync.Once
 	shutdownDone chan struct{}
 }
@@ -51,6 +76,7 @@ type entry struct {
 func NewManager(opts ...Option) *Manager {
 	m := &Manager{
 		pending:      make(map[string]*entry),
+		status:       StatusAccepting,
 		logger:       nopLogger{},
 		shutdownDone: make(chan struct{}),
 	}
@@ -62,12 +88,12 @@ func NewManager(opts ...Option) *Manager {
 
 // Schedule plans a task for execution after duration d.
 // If a task with the same id already exists, the previous one is cancelled
-// and replaced (debouncing). If the manager is closed, Schedule does nothing.
+// and replaced (debouncing). If the manager is not accepting new tasks, Schedule does nothing.
 func (m *Manager) Schedule(id string, d time.Duration, task Task) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.isClosed {
+	if m.isClosed() {
 		return
 	}
 
@@ -89,7 +115,7 @@ func (m *Manager) Schedule(id string, d time.Duration, task Task) {
 		m.mu.RLock()
 		defer m.mu.RUnlock()
 
-		if m.isClosed {
+		if m.isClosed() {
 			cancel()
 			return
 		}
@@ -129,8 +155,12 @@ func (m *Manager) Stats() Stats {
 	return Stats{
 		Pending: pending,
 		Running: m.running,
-		Closed:  m.isClosed,
+		Status:  m.status,
 	}
+}
+
+func (m *Manager) isClosed() bool {
+	return m.status != StatusAccepting
 }
 
 func (m *Manager) acquireSlot(ctx context.Context, id string, e *entry) bool {
@@ -199,7 +229,7 @@ func (m *Manager) Cancel(id string) {
 func (m *Manager) Shutdown(ctx context.Context) error {
 	m.shutdownOnce.Do(func() {
 		m.mu.Lock()
-		m.isClosed = true
+		m.status = StatusDraining
 
 		for id, e := range m.pending {
 			e.timer.Stop()
@@ -211,6 +241,9 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 
 		go func() {
 			m.wg.Wait()
+			m.mu.Lock()
+			m.status = StatusClosed
+			m.mu.Unlock()
 			close(m.shutdownDone)
 		}()
 	})
