@@ -6,6 +6,13 @@ The format is based on https://keepachangelog.com/en/1.1.0/, and this project fo
 
 ## [Unreleased]
 
+### Added
+- Manager lifecycle `Status` model with `StatusAccepting`, `StatusDraining`, and `StatusClosed`.
+
+### Changed
+- `Stats()` now reports `Status` instead of `Closed` (breaking API change).
+- Shutdown state transitions are now explicit: `Accepting -> Draining -> Closed`.
+
 ## [0.1.1] - 2026-03-03
 
 ### Added
