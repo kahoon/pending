@@ -59,7 +59,7 @@ func BenchmarkManager_Shutdown_NoRunningTasks(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		mgr := NewManager()
-		for j := 0; j < pendingTasks; j++ {
+		for j := range pendingTasks {
 			mgr.Schedule(strconv.Itoa(i*pendingTasks+j), time.Hour, benchmarkTask)
 		}
 
@@ -77,7 +77,7 @@ func BenchmarkManager_Shutdown_WithRunningTasks(b *testing.B) {
 		mgr := NewManager(WithLimit(runningTasks, StrategyBlock))
 		started := make(chan struct{}, runningTasks)
 
-		for j := 0; j < runningTasks; j++ {
+		for j := range runningTasks {
 			id := strconv.Itoa(j)
 			mgr.Schedule(id, 0, func(ctx context.Context) {
 				started <- struct{}{}
@@ -85,7 +85,7 @@ func BenchmarkManager_Shutdown_WithRunningTasks(b *testing.B) {
 			})
 		}
 
-		for j := 0; j < runningTasks; j++ {
+		for range runningTasks {
 			select {
 			case <-started:
 			case <-time.After(time.Second):
@@ -98,4 +98,3 @@ func BenchmarkManager_Shutdown_WithRunningTasks(b *testing.B) {
 		b.StopTimer()
 	}
 }
-

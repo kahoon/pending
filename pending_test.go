@@ -376,10 +376,8 @@ func TestManager_StatsConcurrentAccess(t *testing.T) {
 
 	var readers sync.WaitGroup
 	errs := make(chan error, 1)
-	for i := 0; i < 4; i++ {
-		readers.Add(1)
-		go func() {
-			defer readers.Done()
+	for range 4 {
+		readers.Go(func() {
 			for {
 				select {
 				case <-ctx.Done():
@@ -396,10 +394,10 @@ func TestManager_StatsConcurrentAccess(t *testing.T) {
 					return
 				}
 			}
-		}()
+		})
 	}
 
-	for i := 0; i < 200; i++ {
+	for i := range 200 {
 		id := fmt.Sprintf("stats-concurrent-%d", i)
 		mgr.Schedule(id, time.Hour, func(ctx context.Context) {})
 		mgr.Cancel(id)
