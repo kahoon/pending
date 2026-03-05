@@ -596,7 +596,7 @@ func TestCoverage_TimerRaceGuard(t *testing.T) {
 	mgr := NewManager()
 
 	ran := make(chan struct{}, 1)
-	mgr.Schedule("race-trigger", 0, func(ctx context.Context) {
+	mgr.Schedule("race-trigger", 20*time.Millisecond, func(ctx context.Context) {
 		ran <- struct{}{}
 	})
 
@@ -604,8 +604,14 @@ func TestCoverage_TimerRaceGuard(t *testing.T) {
 	mgr.status = StatusDraining
 	mgr.mu.Unlock()
 
+	// Wait until the timer callback has started (or fail).
+	waitFor(t, 200*time.Millisecond, func() bool {
+		return !mgr.IsPending("race-trigger")
+	}, "expected timer callback to run while manager is draining")
+
 	select {
 	case <-ran:
+		t.Fatal("task should not execute when manager is draining")
 	case <-time.After(100 * time.Millisecond):
 	}
 }
