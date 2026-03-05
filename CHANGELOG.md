@@ -6,6 +6,8 @@ The format is based on https://keepachangelog.com/en/1.1.0/, and this project fo
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-03-05
+
 ### Added
 - `IsPending(id)` helper to check whether a task exists and has not started.
 - `TimeRemaining(id)` helper to inspect remaining time until a task timer fires.
