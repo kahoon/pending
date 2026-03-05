@@ -3,5 +3,7 @@
 // Tasks are keyed by ID, so scheduling with the same ID replaces the previous
 // task (debouncing). The manager supports cancellation, graceful shutdown, and
 // optional concurrency limits with block or drop strategies.
+//
+// Runtime state can be inspected with Stats(), while IsPending() and
+// TimeRemaining() provide per-task introspection.
 package pending
-

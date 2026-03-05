@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -68,8 +69,10 @@ type Manager struct {
 }
 
 type entry struct {
-	timer  *time.Timer
-	cancel context.CancelFunc
+	timer    *time.Timer
+	deadline time.Time
+	started  atomic.Bool
+	cancel   context.CancelFunc
 }
 
 // NewManager initializes a new Manager with the provided options.
@@ -84,6 +87,23 @@ func NewManager(opts ...Option) *Manager {
 		opt(m)
 	}
 	return m
+}
+
+// Stats returns a lock-safe snapshot of manager state.
+func (m *Manager) Stats() Stats {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	pending := len(m.pending) - m.running
+	if pending < 0 {
+		pending = 0
+	}
+
+	return Stats{
+		Pending: pending,
+		Running: m.running,
+		Status:  m.status,
+	}
 }
 
 // Schedule plans a task for execution after duration d.
@@ -107,10 +127,12 @@ func (m *Manager) Schedule(id string, d time.Duration, task Task) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	e := &entry{cancel: cancel}
+	e := &entry{cancel: cancel, deadline: time.Now().Add(d)}
 
 	// Schedule the execution.
 	e.timer = time.AfterFunc(d, func() {
+		e.started.Store(true)
+
 		// Hold a read lock so Shutdown cannot reach wg.Wait before wg.Go is called.
 		m.mu.RLock()
 		defer m.mu.RUnlock()
@@ -142,21 +164,30 @@ func (m *Manager) Schedule(id string, d time.Duration, task Task) {
 	m.pending[id] = e
 }
 
-// Stats returns a lock-safe snapshot of manager state.
-func (m *Manager) Stats() Stats {
+// TimeRemaining returns the remaining time until a pending task's timer fires.
+// If the task does not exist or is no longer pending, it returns zero.
+func (m *Manager) TimeRemaining(id string) time.Duration {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	pending := len(m.pending) - m.running
-	if pending < 0 {
-		pending = 0
+	task, ok := m.pending[id]
+	if !ok || task.started.Load() {
+		return 0
 	}
 
-	return Stats{
-		Pending: pending,
-		Running: m.running,
-		Status:  m.status,
+	remaining := time.Until(task.deadline)
+	if remaining < 0 {
+		return 0
 	}
+	return remaining
+}
+
+// IsPending reports whether a task exists and has not started execution yet.
+func (m *Manager) IsPending(id string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	task, ok := m.pending[id]
+	return ok && !task.started.Load()
 }
 
 func (m *Manager) isClosed() bool {
