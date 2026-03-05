@@ -94,10 +94,7 @@ func (m *Manager) Stats() Stats {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	pending := len(m.pending) - m.running
-	if pending < 0 {
-		pending = 0
-	}
+	pending := max(len(m.pending)-m.running, 0)
 
 	return Stats{
 		Pending: pending,
