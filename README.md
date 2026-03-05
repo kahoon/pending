@@ -9,14 +9,17 @@
 
 `pending` is designed for in-memory, ID-based deferred actions. It fits use cases like debouncing user input, handling hardware delays, or managing state-dependent timeouts.
 
+![pending overview](assets/pending.png)
+
 ## Why pending?
 
 - **Pure Go**: Built entirely on the standard library.
-- **Simple API**: `Schedule`, `Cancel`, and `Shutdown`.
+- **Simple API**: Core lifecycle methods plus optional introspection helpers.
 - **Debouncing by ID**: Scheduling the same ID replaces the previous task.
 - **Concurrency Limits**: Choose blocking or dropping behavior when at capacity.
 - **Graceful Shutdown**: Cancel timers and wait for active tasks to finish.
 - **Runtime Stats**: Read pending/running/status state via `Stats()`.
+- **Task Introspection**: Check `IsPending()` and `TimeRemaining()` per task ID.
 - **Pluggable Telemetry**: Attach your own metrics/logging hooks.
 
 ## Installation
@@ -158,6 +161,18 @@ mgr.Cancel("user_123_unlock")
 s := mgr.Stats()
 log.Printf("pending=%d running=%d status=%s", s.Pending, s.Running, s.Status)
 ```
+
+### Task Introspection
+
+```go
+if mgr.IsPending("retry:order-42") {
+    remaining := mgr.TimeRemaining("retry:order-42")
+    log.Printf("retry is still pending, timer fires in %s", remaining)
+}
+```
+
+`TimeRemaining` reports time until the task's timer fires. It returns `0` if
+the task is missing or already started.
 
 ## Benchmarks
 

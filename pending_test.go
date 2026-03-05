@@ -415,6 +415,129 @@ func TestManager_StatsConcurrentAccess(t *testing.T) {
 	}
 }
 
+func TestManager_IsPendingLifecycle(t *testing.T) {
+	mgr := NewManager()
+	const id = "is-pending"
+
+	if mgr.IsPending("missing") {
+		t.Fatal("expected missing task to not be pending")
+	}
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan struct{})
+
+	mgr.Schedule(id, 80*time.Millisecond, func(ctx context.Context) {
+		close(started)
+		<-release
+		close(done)
+	})
+
+	if !mgr.IsPending(id) {
+		t.Fatal("expected task to be pending before timer fires")
+	}
+
+	select {
+	case <-started:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timed out waiting for task to start")
+	}
+
+	if mgr.IsPending(id) {
+		t.Fatal("expected task to no longer be pending once started")
+	}
+
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timed out waiting for task completion")
+	}
+
+	if mgr.IsPending(id) {
+		t.Fatal("expected completed task to not be pending")
+	}
+}
+
+func TestManager_TimeRemaining(t *testing.T) {
+	mgr := NewManager()
+	const id = "remaining"
+
+	if got := mgr.TimeRemaining("missing"); got != 0 {
+		t.Fatalf("expected zero remaining for missing task, got %v", got)
+	}
+
+	mgr.Schedule(id, 120*time.Millisecond, func(ctx context.Context) {})
+
+	first := mgr.TimeRemaining(id)
+	if first <= 0 {
+		t.Fatalf("expected positive remaining duration, got %v", first)
+	}
+	if first > 200*time.Millisecond {
+		t.Fatalf("unexpectedly large remaining duration: %v", first)
+	}
+
+	time.Sleep(30 * time.Millisecond)
+	second := mgr.TimeRemaining(id)
+	if second <= 0 {
+		t.Fatalf("expected positive remaining duration after sleep, got %v", second)
+	}
+	if second >= first {
+		t.Fatalf("expected remaining duration to decrease: first=%v second=%v", first, second)
+	}
+
+	mgr.Cancel(id)
+	if got := mgr.TimeRemaining(id); got != 0 {
+		t.Fatalf("expected zero remaining after cancel, got %v", got)
+	}
+}
+
+func TestManager_TimeRemainingZeroAfterStart(t *testing.T) {
+	mgr := NewManager()
+	const id = "remaining-started"
+	started := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan struct{})
+
+	mgr.Schedule(id, 0, func(ctx context.Context) {
+		close(started)
+		<-release
+		close(done)
+	})
+
+	select {
+	case <-started:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timed out waiting for task start")
+	}
+
+	if got := mgr.TimeRemaining(id); got != 0 {
+		t.Fatalf("expected zero remaining once task has started, got %v", got)
+	}
+	if mgr.IsPending(id) {
+		t.Fatal("expected started task to not be pending")
+	}
+
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timed out waiting for task completion")
+	}
+}
+
+func TestManager_TimeRemainingPastDeadlineClampsToZero(t *testing.T) {
+	mgr := NewManager()
+
+	mgr.mu.Lock()
+	mgr.pending["overdue"] = &entry{deadline: time.Now().Add(-1 * time.Second)}
+	mgr.mu.Unlock()
+
+	if got := mgr.TimeRemaining("overdue"); got != 0 {
+		t.Fatalf("expected zero remaining for overdue task, got %v", got)
+	}
+}
+
 func TestStatus_String(t *testing.T) {
 	tests := []struct {
 		name   string
