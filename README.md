@@ -46,27 +46,36 @@ mgr.Schedule("user:42:email", 2*time.Second, func(ctx context.Context) {
 
 ## Cookbook
 
-### Debouncing by ID
+### Debouncing User Events
 
 ```go
 mgr := pending.NewManager()
 
-func onSensorDataReceived(sensorID string) {
-    mgr.Schedule(sensorID, 10*time.Second, func(ctx context.Context) {
-        fmt.Printf("Alert: Sensor %s went offline!\n", sensorID)
+func onSearchInput(userID, query string) {
+    key := "search:" + userID
+    mgr.Schedule(key, 300*time.Millisecond, func(ctx context.Context) {
+        if ctx.Err() != nil {
+            return
+        }
+        runSearch(query)
     })
 }
 ```
 
-### Manual Cancellation
+### Resettable State Timeout
 
 ```go
 mgr := pending.NewManager()
 
-mgr.Schedule("user_123_unlock", 30*time.Minute, unlockTask)
-
-// User was unlocked manually, no need to run delayed task.
-mgr.Cancel("user_123_unlock")
+func onSessionActivity(sessionID string) {
+    key := "session-timeout:" + sessionID
+    mgr.Schedule(key, 15*time.Minute, func(ctx context.Context) {
+        if ctx.Err() != nil {
+            return
+        }
+        expireSession(sessionID)
+    })
+}
 ```
 
 ### Concurrency Limits (Drop)
@@ -85,17 +94,62 @@ for i := 0; i < 100; i++ {
 When a task is dropped under `StrategyDrop`, your telemetry handler receives
 `pending.ErrTaskDropped` via `OnFailed`, so you can match it with `errors.Is`.
 
-### Graceful Shutdown
+### Delayed Retry with Cancellation
 
 ```go
 mgr := pending.NewManager()
 
-ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-defer cancel()
+func scheduleRetry(jobID string, attempt int) {
+    key := "retry:" + jobID
+    delay := time.Duration(attempt) * time.Second
 
-if err := mgr.Shutdown(ctx); err != nil {
-    log.Printf("shutdown timed out: %v", err)
+    mgr.Schedule(key, delay, func(ctx context.Context) {
+        if ctx.Err() != nil {
+            return
+        }
+        if err := sendWebhook(jobID); err != nil {
+            scheduleRetry(jobID, attempt+1)
+        }
+    })
 }
+
+// Stop any pending retry if the job succeeds elsewhere.
+func onJobSucceeded(jobID string) {
+    mgr.Cancel("retry:" + jobID)
+}
+```
+
+### Safe Service Shutdown Wiring in `main()`
+
+```go
+func main() {
+    mgr := pending.NewManager()
+    defer func() {
+        ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+        defer cancel()
+        _ = mgr.Shutdown(ctx)
+    }()
+
+    sig := make(chan os.Signal, 1)
+    signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+    defer signal.Stop(sig)
+
+    go runHTTPServer(mgr)
+
+    <-sig
+    log.Println("signal received, draining pending tasks")
+}
+```
+
+### Manual Cancellation
+
+```go
+mgr := pending.NewManager()
+
+mgr.Schedule("user_123_unlock", 30*time.Minute, unlockTask)
+
+// User was unlocked manually, no need to run delayed task.
+mgr.Cancel("user_123_unlock")
 ```
 
 ### Runtime Stats
