@@ -47,6 +47,52 @@ mgr.Schedule("user:42:email", 2*time.Second, func(ctx context.Context) {
 })
 ```
 
+## Scheduling APIs
+
+### Simple path: `Schedule`
+
+Use `Schedule` for straightforward delayed execution with ID-based debouncing:
+
+```go
+mgr.Schedule("invoice:42:reminder", 10*time.Minute, func(ctx context.Context) {
+    if ctx.Err() != nil {
+        return
+    }
+    sendReminder("42")
+})
+```
+
+### Advanced path: `ScheduleWith`
+
+Use `ScheduleWith` when you need option-driven behavior such as absolute-time
+scheduling and `IfAbsent` semantics:
+
+```go
+at := time.Now().Add(30 * time.Second)
+
+scheduled, err := mgr.ScheduleWith(
+    "report:nightly",
+    func(ctx context.Context) error {
+        return generateReport(ctx)
+    },
+    pending.ScheduleOptions{
+        At:       at,
+        IfAbsent: true,
+    },
+)
+if err != nil {
+    if errors.Is(err, pending.ErrInvalidScheduleOptions) {
+        log.Printf("invalid scheduling options: %v", err)
+    }
+    if errors.Is(err, pending.ErrManagerNotAccepting) {
+        log.Printf("manager is shutting down, task rejected")
+    }
+}
+if !scheduled {
+    log.Printf("task already exists and IfAbsent prevented replacement")
+}
+```
+
 ## Cookbook
 
 ### Debouncing User Events
