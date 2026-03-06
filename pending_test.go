@@ -2,6 +2,7 @@ package pending
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -252,6 +253,151 @@ func TestManager_ScheduleAfterShutdownIsNoOp(t *testing.T) {
 	case <-ran:
 		t.Fatal("task should not run after shutdown")
 	case <-time.After(30 * time.Millisecond):
+	}
+}
+
+func TestManager_ScheduleWith_ReturnsErrWhenNotAccepting(t *testing.T) {
+	mgr := NewManager()
+
+	if err := mgr.Shutdown(context.Background()); err != nil {
+		t.Fatalf("shutdown failed: %v", err)
+	}
+
+	scheduled, err := mgr.ScheduleWith("late-task", func(ctx context.Context) error {
+		return nil
+	}, ScheduleOptions{Delay: 0})
+
+	if scheduled {
+		t.Fatal("expected scheduling to be rejected after shutdown")
+	}
+	if !errors.Is(err, ErrManagerNotAccepting) {
+		t.Fatalf("expected ErrManagerNotAccepting, got %v", err)
+	}
+}
+
+func TestManager_ScheduleWith_RejectsDelayAndAt(t *testing.T) {
+	mgr := NewManager()
+
+	scheduled, err := mgr.ScheduleWith("invalid", func(ctx context.Context) error {
+		return nil
+	}, ScheduleOptions{
+		Delay: time.Second,
+		At:    time.Now().Add(time.Second),
+	})
+
+	if scheduled {
+		t.Fatal("expected scheduling to fail for invalid options")
+	}
+	if !errors.Is(err, ErrInvalidScheduleOptions) {
+		t.Fatalf("expected ErrInvalidScheduleOptions, got %v", err)
+	}
+}
+
+func TestManager_ScheduleWith_AtInPastRunsImmediately(t *testing.T) {
+	mgr := NewManager()
+	ran := make(chan struct{}, 1)
+
+	scheduled, err := mgr.ScheduleWith("past-at", func(ctx context.Context) error {
+		ran <- struct{}{}
+		return nil
+	}, ScheduleOptions{
+		At: time.Now().Add(-1 * time.Second),
+	})
+	if err != nil {
+		t.Fatalf("unexpected schedule error: %v", err)
+	}
+	if !scheduled {
+		t.Fatal("expected scheduling to succeed")
+	}
+
+	select {
+	case <-ran:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("expected task to run immediately for past At")
+	}
+}
+
+func TestManager_ScheduleWith_AtInFutureDelaysExecution(t *testing.T) {
+	mgr := NewManager()
+	ran := make(chan struct{}, 1)
+	start := time.Now()
+
+	scheduled, err := mgr.ScheduleWith("future-at", func(ctx context.Context) error {
+		ran <- struct{}{}
+		return nil
+	}, ScheduleOptions{
+		At: time.Now().Add(35 * time.Millisecond),
+	})
+	if err != nil {
+		t.Fatalf("unexpected schedule error: %v", err)
+	}
+	if !scheduled {
+		t.Fatal("expected scheduling to succeed")
+	}
+
+	select {
+	case <-ran:
+		if elapsed := time.Since(start); elapsed < 20*time.Millisecond {
+			t.Fatalf("task ran too early for future At: %v", elapsed)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("expected task to run for future At")
+	}
+}
+
+func TestManager_ScheduleWith_IfAbsentDoesNotReplace(t *testing.T) {
+	mgr := NewManager()
+	firstRan := make(chan struct{}, 1)
+	secondRan := make(chan struct{}, 1)
+
+	scheduled, err := mgr.ScheduleWith("same-id", func(ctx context.Context) error {
+		firstRan <- struct{}{}
+		return nil
+	}, ScheduleOptions{Delay: 40 * time.Millisecond})
+	if err != nil || !scheduled {
+		t.Fatalf("expected first schedule to succeed: scheduled=%v err=%v", scheduled, err)
+	}
+
+	scheduled, err = mgr.ScheduleWith("same-id", func(ctx context.Context) error {
+		secondRan <- struct{}{}
+		return nil
+	}, ScheduleOptions{Delay: 0, IfAbsent: true})
+	if err != nil {
+		t.Fatalf("expected no error for IfAbsent path, got %v", err)
+	}
+	if scheduled {
+		t.Fatal("expected IfAbsent schedule to be skipped")
+	}
+
+	select {
+	case <-secondRan:
+		t.Fatal("replacement task should not run when IfAbsent is true")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	select {
+	case <-firstRan:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("expected original task to run")
+	}
+}
+
+func TestManager_ScheduleWith_TaskErrorReported(t *testing.T) {
+	wantErr := errors.New("boom")
+	spy := &spyLogger{failedSig: make(chan struct{}, 1)}
+	mgr := NewManager(WithLogger(spy))
+
+	scheduled, err := mgr.ScheduleWith("err-task", func(ctx context.Context) error {
+		return wantErr
+	}, ScheduleOptions{Delay: 0})
+	if err != nil || !scheduled {
+		t.Fatalf("expected schedule to succeed: scheduled=%v err=%v", scheduled, err)
+	}
+
+	select {
+	case <-spy.failedSig:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("expected OnFailed to be called for task error")
 	}
 }
 
