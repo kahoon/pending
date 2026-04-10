@@ -17,6 +17,8 @@ type ScheduleOptions struct {
 	At time.Time
 	// IfAbsent only schedules when no task with the same ID exists.
 	IfAbsent bool
+	// SkipIfRunning skips scheduling when a task with the same ID is already executing.
+	SkipIfRunning bool
 	// Group is reserved for future grouped task operations.
 	Group string
 	// Retry is reserved for future retry support.
@@ -33,8 +35,9 @@ type RetryPolicy struct {
 }
 
 type scheduleConfig struct {
-	delay    time.Duration
-	ifAbsent bool
+	delay         time.Duration
+	ifAbsent      bool
+	skipIfRunning bool
 }
 
 func newConfig() scheduleConfig {
@@ -43,6 +46,7 @@ func newConfig() scheduleConfig {
 
 func (c scheduleConfig) validate(opt ScheduleOptions) (scheduleConfig, error) {
 	c.ifAbsent = opt.IfAbsent
+	c.skipIfRunning = opt.SkipIfRunning
 
 	hasDelay := opt.Delay != 0
 	hasAt := !opt.At.IsZero()
