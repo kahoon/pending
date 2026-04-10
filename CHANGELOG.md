@@ -6,6 +6,22 @@ The format is based on https://keepachangelog.com/en/1.1.0/, and this project fo
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-04-10
+
+### Added
+- `ScheduleWith(id, task, options)` for advanced scheduling with error-returning tasks.
+- `ScheduleOptions` with support for `Delay`, `At`, `IfAbsent`, and `SkipIfRunning`.
+- `TaskWithError` callback type for task-level error reporting.
+- `RetryPolicy` placeholder type for future retry support.
+
+### Changed
+- Internal scheduling and stats code are split into dedicated files for clarity and future growth.
+- README now documents the simple `Schedule` path alongside the advanced `ScheduleWith` path.
+- Package docs now mention both scheduling APIs.
+
+### Fixed
+- `SkipIfRunning` prevents queueing a new task when the same ID is already executing, while still allowing replacement of a pending task.
+
 ## [0.3.0] - 2026-03-05
 
 ### Added
