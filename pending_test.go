@@ -382,6 +382,77 @@ func TestManager_ScheduleWith_IfAbsentDoesNotReplace(t *testing.T) {
 	}
 }
 
+func TestManager_ScheduleWith_SkipIfRunningDoesNotQueue(t *testing.T) {
+	mgr := NewManager()
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	secondRan := make(chan struct{}, 1)
+
+	scheduled, err := mgr.ScheduleWith("same-id", func(ctx context.Context) error {
+		close(firstStarted)
+		<-releaseFirst
+		return nil
+	}, ScheduleOptions{Delay: 0})
+	if err != nil || !scheduled {
+		t.Fatalf("expected first schedule to succeed: scheduled=%v err=%v", scheduled, err)
+	}
+
+	<-firstStarted
+
+	scheduled, err = mgr.ScheduleWith("same-id", func(ctx context.Context) error {
+		secondRan <- struct{}{}
+		return nil
+	}, ScheduleOptions{Delay: 0, SkipIfRunning: true})
+	if err != nil {
+		t.Fatalf("expected no error for SkipIfRunning path, got %v", err)
+	}
+	if scheduled {
+		t.Fatal("expected schedule to be skipped while matching task is running")
+	}
+
+	close(releaseFirst)
+
+	select {
+	case <-secondRan:
+		t.Fatal("task should not have been queued while previous run was active")
+	case <-time.After(80 * time.Millisecond):
+	}
+}
+
+func TestManager_ScheduleWith_SkipIfRunningStillReplacesPending(t *testing.T) {
+	mgr := NewManager()
+	firstRan := make(chan struct{}, 1)
+	secondRan := make(chan struct{}, 1)
+
+	scheduled, err := mgr.ScheduleWith("same-id", func(ctx context.Context) error {
+		firstRan <- struct{}{}
+		return nil
+	}, ScheduleOptions{Delay: 80 * time.Millisecond})
+	if err != nil || !scheduled {
+		t.Fatalf("expected first schedule to succeed: scheduled=%v err=%v", scheduled, err)
+	}
+
+	scheduled, err = mgr.ScheduleWith("same-id", func(ctx context.Context) error {
+		secondRan <- struct{}{}
+		return nil
+	}, ScheduleOptions{Delay: 0, SkipIfRunning: true})
+	if err != nil || !scheduled {
+		t.Fatalf("expected pending task to be replaced: scheduled=%v err=%v", scheduled, err)
+	}
+
+	select {
+	case <-secondRan:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("expected replacement task to run")
+	}
+
+	select {
+	case <-firstRan:
+		t.Fatal("expected original pending task to be replaced")
+	case <-time.After(120 * time.Millisecond):
+	}
+}
+
 func TestManager_ScheduleWith_TaskErrorReported(t *testing.T) {
 	wantErr := errors.New("boom")
 	spy := &spyLogger{failedSig: make(chan struct{}, 1)}

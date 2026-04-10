@@ -172,6 +172,9 @@ func (m *Manager) schedule(id string, task TaskWithError, cfg scheduleConfig) (s
 		if cfg.ifAbsent {
 			return false, nil
 		}
+		if cfg.skipIfRunning && old.started.Load() {
+			return false, nil
+		}
 		old.timer.Stop()
 		old.cancel()
 		m.logger.OnRescheduled(id)
