@@ -14,6 +14,7 @@ type spyLogger struct {
 	mu        sync.Mutex
 	dropped   bool
 	failedSig chan struct{}
+	executing chan struct{}
 }
 
 func (s *spyLogger) OnFailed(id string, err error) {
@@ -23,6 +24,15 @@ func (s *spyLogger) OnFailed(id string, err error) {
 	if s.failedSig != nil {
 		select {
 		case s.failedSig <- struct{}{}:
+		default:
+		}
+	}
+}
+
+func (s *spyLogger) OnExecuting(id string) {
+	if s.executing != nil {
+		select {
+		case s.executing <- struct{}{}:
 		default:
 		}
 	}
@@ -469,6 +479,24 @@ func TestManager_ScheduleWith_TaskErrorReported(t *testing.T) {
 	case <-spy.failedSig:
 	case <-time.After(200 * time.Millisecond):
 		t.Fatal("expected OnFailed to be called for task error")
+	}
+}
+
+func TestManager_ScheduleWith_ReportsOnExecuting(t *testing.T) {
+	spy := &spyLogger{executing: make(chan struct{}, 1)}
+	mgr := NewManager(WithLogger(spy))
+
+	scheduled, err := mgr.ScheduleWith("exec-hook", func(ctx context.Context) error {
+		return nil
+	}, ScheduleOptions{Delay: 0})
+	if err != nil || !scheduled {
+		t.Fatalf("expected schedule to succeed: scheduled=%v err=%v", scheduled, err)
+	}
+
+	select {
+	case <-spy.executing:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("expected OnExecuting to be called before task execution")
 	}
 }
 
