@@ -802,6 +802,7 @@ func TestCoverageBooster(t *testing.T) {
 	n := nopLogger{}
 	n.OnScheduled("t", time.Second)
 	n.OnRescheduled("t")
+	n.OnExecuting("t")
 	n.OnExecuted("t", time.Second)
 	n.OnCancelled("t")
 	n.OnFailed("t", fmt.Errorf("err"))
