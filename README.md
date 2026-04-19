@@ -93,6 +93,21 @@ if !scheduled {
 }
 ```
 
+## Telemetry
+
+`TelemetryHandler` can observe the task lifecycle through these hooks:
+
+- `OnScheduled` when a task is first accepted.
+- `OnRescheduled` when a pending task with the same ID is replaced.
+- `OnExecuting` immediately before the task function is invoked.
+- `OnExecuted` after the task returns, with execution duration.
+- `OnCancelled` when a pending task is canceled or removed during shutdown.
+- `OnFailed` when a task returns an error, or when `StrategyDrop` rejects execution.
+
+Adding `OnExecuting` expands the `TelemetryHandler` interface. Existing custom
+implementations will need to add that method when upgrading to the next
+release.
+
 ## Cookbook
 
 ### Debouncing User Events

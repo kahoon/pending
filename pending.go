@@ -208,6 +208,7 @@ func (m *Manager) schedule(id string, task TaskWithError, cfg scheduleConfig) (s
 			m.running.Add(1)
 			defer m.running.Add(-1)
 
+			m.logger.OnExecuting(id)
 			start := time.Now()
 			err := task(ctx)
 			duration := time.Since(start)

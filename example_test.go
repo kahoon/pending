@@ -10,6 +10,7 @@ type exampleTelemetry struct{}
 
 func (exampleTelemetry) OnScheduled(id string, d time.Duration)       {}
 func (exampleTelemetry) OnRescheduled(id string)                      {}
+func (exampleTelemetry) OnExecuting(id string)                        {}
 func (exampleTelemetry) OnExecuted(id string, duration time.Duration) {}
 func (exampleTelemetry) OnCancelled(id string)                        {}
 func (exampleTelemetry) OnFailed(id string, err error) {
