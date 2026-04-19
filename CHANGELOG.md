@@ -6,6 +6,12 @@ The format is based on https://keepachangelog.com/en/1.1.0/, and this project fo
 
 ## [Unreleased]
 
+### Added
+- `TelemetryHandler.OnExecuting(id)` hook, emitted immediately before a task begins executing.
+
+### Changed
+- `TelemetryHandler` implementers will need to add `OnExecuting(id)` in the next release. This is a breaking API change and should ship as `v0.5.0`.
+
 ## [0.4.0] - 2026-04-10
 
 ### Added
